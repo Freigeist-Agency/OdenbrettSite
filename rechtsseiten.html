@@ -2,6 +2,8 @@
 <html data-wf-page="675950295c12e357f2acbeb2" data-wf-site="67586c680395ab29da8966e1">
 <head>
   <meta charset="utf-8">
+  <meta http-equiv="X-Content-Type-Options" content="nosniff">
+  <meta name="referrer" content="strict-origin-when-cross-origin">
   <script>
     if (location.pathname.endsWith('.html')) {
       var clean = location.pathname.replace(/\/index\.html$/, '/').replace(/\.html$/, '');
@@ -146,10 +148,30 @@
         <div class="w-embed w-script">
           <div id="lc-text-1"></div>
           <script>
-  fetch(`https://app.cockpit.legal/api/cockpit/resources/legaldocumentshare/01f7cf8b149df1c6af1872bc912afb96/document/render/html?language=de`)
+  function sanitizeLegalHTML(rawHTML) {
+  var parser = new DOMParser();
+  var doc = parser.parseFromString(rawHTML, 'text/html');
+  var dangerous = doc.querySelectorAll('script, iframe, object, embed, link, meta, style, base');
+  for (var i = 0; i < dangerous.length; i++) {
+    dangerous[i].remove();
+  }
+  var all = doc.querySelectorAll('*');
+  for (var j = 0; j < all.length; j++) {
+    var el = all[j];
+    for (var k = el.attributes.length - 1; k >= 0; k--) {
+      var attr = el.attributes[k];
+      if (/^on/i.test(attr.name) || /javascript:/i.test(attr.value)) {
+        el.removeAttribute(attr.name);
+      }
+    }
+  }
+  return doc.body.innerHTML;
+}
+
+fetch(`https://app.cockpit.legal/api/cockpit/resources/legaldocumentshare/01f7cf8b149df1c6af1872bc912afb96/document/render/html?language=de`)
   .then((result) => { return result.text(); })
   .then((content) => {
-    document.getElementById("lc-text-1").innerHTML = content
+    var t1 = document.getElementById("lc-text-1"); if (t1) t1.innerHTML = sanitizeLegalHTML(content);
   });
 </script>
           <noscript>
@@ -163,7 +185,7 @@
   fetch(`https://app.cockpit.legal/api/cockpit/resources/legaldocumentshare/1fbbd73f10342a1fa04f629fe5ca0d3e/document/render/html?language=de`)
   .then((result) => { return result.text(); })
   .then((content) => {
-    document.getElementById("lc-text-2").innerHTML = content
+    var t2 = document.getElementById("lc-text-2"); if (t2) t2.innerHTML = sanitizeLegalHTML(content);
   });
 </script>
           <noscript>
