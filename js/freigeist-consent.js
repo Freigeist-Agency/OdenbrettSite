@@ -22,7 +22,10 @@
     siteId: (currentScript && currentScript.getAttribute('data-site')) || 'default',
     privacyUrl: (currentScript && currentScript.getAttribute('data-privacy-url')) || '',
     imprintUrl: (currentScript && currentScript.getAttribute('data-imprint-url')) || '',
-    lang: (currentScript && currentScript.getAttribute('data-lang')) || ''
+    lang: (currentScript && currentScript.getAttribute('data-lang')) || '',
+    // Forge site key: with it, each choice is sent to Forge as a consent receipt (proof under GDPR Art. 7(1)).
+    logKey: (currentScript && currentScript.getAttribute('data-log-key')) || '',
+    logUrl: (currentScript && currentScript.getAttribute('data-log-url')) || 'https://app.freigeist.agency/api/consent/log'
   };
 
   var I18N = {
@@ -155,6 +158,9 @@
     var sec = (location.protocol === 'https:') ? '; Secure' : '';
     doc.cookie = cfg.cookieName + '=' + v + '; expires=' + d.toUTCString() + '; path=/; SameSite=Lax' + sec;
     try { localStorage.setItem(cfg.cookieName, v); } catch(e) {}
+    if (cfg.logKey) {
+      try { nav.sendBeacon(cfg.logUrl, JSON.stringify({ k: cfg.logKey, id: state.id, a: state.c.a, m: state.c.m, gpc: state.gpc })); } catch(e) {}
+    }
 
     updateGtag({ analytics: state.c.a, marketing: state.c.m });
     unblockScripts(state.c);
