@@ -1,6 +1,8 @@
 /**
- * Freigeist Consent SDK (v1.0.0)
+ * Freigeist Consent SDK (v1.1.0)
  * Ultra-lightweight, zero-dependency, DSGVO / TDDDG § 25 compliant cookie consent tool.
+ * With data-forge-key, the banner's look, wording, links, categories and the privacy page's cookie list come
+ * from Forge (the site's payload file). Without it, or if Forge doesn't answer within 1.5 s, the defaults below.
  */
 (function() {
   'use strict';
@@ -22,8 +24,35 @@
     siteId: (currentScript && currentScript.getAttribute('data-site')) || 'default',
     privacyUrl: (currentScript && currentScript.getAttribute('data-privacy-url')) || '',
     imprintUrl: (currentScript && currentScript.getAttribute('data-imprint-url')) || '',
-    lang: (currentScript && currentScript.getAttribute('data-lang')) || ''
+    lang: (currentScript && currentScript.getAttribute('data-lang')) || '',
+    // Forge site key: the banner's settings come from Forge, and each choice is sent to Forge as a consent
+    // receipt (proof under GDPR Art. 7(1)). data-log-key is the older name of the same attribute.
+    forgeKey: (currentScript && (currentScript.getAttribute('data-forge-key') || currentScript.getAttribute('data-log-key'))) || '',
+    forgeUrl: (currentScript && currentScript.getAttribute('data-forge-url')) || 'https://app.freigeist.agency'
   };
+  var S = null; // Forge settings: { banner: {...}, cookies: [...] }
+
+  function esc(v) {
+    return String(v == null ? '' : v).replace(/[&<>"']/g, function(ch) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch];
+    });
+  }
+  var HEX = /^#[0-9a-f]{6}$/i;
+
+  // Forge settings, at most 1.5 s: a slow or missing answer must never hold the banner back.
+  function loadSettings(done) {
+    if (!cfg.forgeKey || !/^[a-z0-9]{1,64}$/.test(cfg.forgeKey) || typeof fetch !== 'function') return done();
+    var finished = false;
+    var finish = function() { if (!finished) { finished = true; done(); } };
+    setTimeout(finish, 1500);
+    fetch(cfg.forgeUrl + '/a/' + cfg.forgeKey + '.json', { credentials: 'omit', cache: 'no-store' })
+      .then(function(r) { return r.ok ? r.json() : null; })
+      .then(function(p) {
+        if (!finished && p && p.consent && p.consent.banner) S = p.consent;
+        finish();
+      })
+      .catch(finish);
+  }
 
   var I18N = {
     de: {
@@ -49,10 +78,10 @@
       d: 'We use cookies and technology to run our website and enhance your experience. You can update your preferences anytime.',
       pl: 'Privacy Policy',
       il: 'Legal Notice',
-      accept: 'Accept All',
-      deny: 'Deny All',
+      accept: 'Accept all',
+      deny: 'Deny all',
       custom: 'Customize',
-      save: 'Save Preferences',
+      save: 'Save preferences',
       gpc: 'GPC signal active: Marketing opted out',
       c: {
         n: ['Necessary', 'Required for basic site functionality and security.'],
@@ -74,6 +103,7 @@
   }
 
   function getLegalLinks(l) {
+    if (S && S.banner.privacyUrl && S.banner.imprintUrl) return { p: S.banner.privacyUrl, i: S.banner.imprintUrl };
     var p = cfg.privacyUrl || ((l === 'de') ? '/datenschutz' : '/privacy-policy');
     var i = cfg.imprintUrl || '/impressum';
     if (doc.querySelector('a[href*="rechtsseiten"]')) { p = '/rechtsseiten'; i = '/rechtsseiten'; }
@@ -155,6 +185,9 @@
     var sec = (location.protocol === 'https:') ? '; Secure' : '';
     doc.cookie = cfg.cookieName + '=' + v + '; expires=' + d.toUTCString() + '; path=/; SameSite=Lax' + sec;
     try { localStorage.setItem(cfg.cookieName, v); } catch(e) {}
+    if (cfg.forgeKey) {
+      try { nav.sendBeacon(cfg.forgeUrl + '/api/consent/log', JSON.stringify({ k: cfg.forgeKey, id: state.id, a: state.c.a, m: state.c.m, gpc: state.gpc })); } catch(e) {}
+    }
 
     updateGtag({ analytics: state.c.a, marketing: state.c.m });
     unblockScripts(state.c);
@@ -203,27 +236,33 @@
     if (doc.getElementById('fgc-css')) return;
     var s = doc.createElement('style');
     s.id = 'fgc-css';
+    var b = (S && S.banner) || {};
+    var bg = HEX.test(b.bg) ? b.bg : '#0d0e11', fg = HEX.test(b.fg) ? b.fg : '#eceff4';
+    var ac = HEX.test(b.accent) ? b.accent : '#ffffff', on = HEX.test(b.onAccent) ? b.onAccent : '#0d0e11';
+    var r = (typeof b.radius === 'number' && b.radius >= 0 && b.radius <= 24) ? b.radius : 12;
+    var line = 'color-mix(in srgb,' + fg + ' 18%,' + bg + ')', soft = 'color-mix(in srgb,' + fg + ' 6%,' + bg + ')';
     s.textContent = '.fgc-box{position:fixed;bottom:0;left:0;right:0;z-index:2147483640;display:flex;justify-content:center;padding:16px;pointer-events:none;contain:layout style;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif;box-sizing:border-box}' +
-      '.fgc-card{width:100%;max-width:640px;background:#0d0e11;color:#eceff4;border:1px solid #242933;border-radius:12px;padding:20px;box-shadow:0 24px 48px rgba(0,0,0,.5);pointer-events:auto;transform:translate3d(0,120%,0);opacity:0;transition:transform .3s cubic-bezier(.16,1,.3,1),opacity .25s ease}' +
+      '.fgc-card{width:100%;max-width:640px;background:' + bg + ';color:' + fg + ';border:1px solid ' + line + ';border-radius:' + r + 'px;padding:20px;box-shadow:0 24px 48px rgba(0,0,0,.35);pointer-events:auto;transform:translate3d(0,120%,0);opacity:0;transition:transform .3s cubic-bezier(.16,1,.3,1),opacity .25s ease}' +
       '.fgc-open .fgc-card{transform:translate3d(0,0,0);opacity:1}' +
-      '.fgc-tag{display:inline-block;font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;padding:2px 8px;border-radius:4px;background:#1a1f29;color:#88c0d0;border:1px solid #2e3440;margin-bottom:8px}' +
-      '.fgc-gpc{font-size:12px;color:#a3be8c;background:rgba(163,190,140,.12);padding:4px 8px;border-radius:4px;margin-top:6px;display:inline-block}' +
-      '.fgc-h2{font-size:18px;font-weight:700;color:#fff;margin:0 0 6px;line-height:1.2}' +
-      '.fgc-p{font-size:13px;line-height:1.5;color:#d8dee9;margin:0}' +
-      '.fgc-p a{color:#88c0d0;text-decoration:underline;text-underline-offset:2px}' +
-      '.fgc-acc{margin-top:14px;padding-top:12px;border-top:1px solid #242933;display:none;flex-direction:column;gap:8px}' +
-      '.fgc-row{display:flex;align-items:flex-start;gap:10px;padding:8px;background:#141720;border-radius:6px;border:1px solid #222734}' +
-      '.fgc-row input{margin-top:2px;width:16px;height:16px;accent-color:#88c0d0}' +
-      '.fgc-row strong{display:block;font-size:13px;color:#fff}' +
-      '.fgc-row span{font-size:12px;color:#9aa2b1;line-height:1.35}' +
+      '.fgc-tag{display:inline-block;font-size:11px;font-weight:700;letter-spacing:.08em;padding:2px 8px;border-radius:4px;background:' + soft + ';color:' + fg + ';border:1px solid ' + line + ';margin-bottom:8px}' +
+      '.fgc-gpc{font-size:12px;color:' + fg + ';background:' + soft + ';padding:4px 8px;border-radius:4px;margin-top:6px;display:inline-block}' +
+      '.fgc-h2{font-size:18px;font-weight:700;color:' + fg + ';margin:0 0 6px;line-height:1.2}' +
+      '.fgc-p{font-size:13px;line-height:1.5;color:' + fg + ';margin:0}' +
+      '.fgc-p a{color:' + fg + ';text-decoration:underline;text-underline-offset:2px}' +
+      '.fgc-acc{margin-top:14px;padding-top:12px;border-top:1px solid ' + line + ';display:none;flex-direction:column;gap:8px}' +
+      '.fgc-row{display:flex;align-items:flex-start;gap:10px;padding:8px;background:' + soft + ';border-radius:6px;border:1px solid ' + line + '}' +
+      '.fgc-row input{margin-top:2px;width:16px;height:16px;accent-color:' + ac + '}' +
+      '.fgc-row strong{display:block;font-size:13px;color:' + fg + '}' +
+      '.fgc-row span{font-size:12px;color:' + fg + ';opacity:.8;line-height:1.35}' +
       '.fgc-bar{display:flex;gap:8px;margin-top:16px}' +
-      '.fgc-b{flex:1;min-height:44px;display:inline-flex;align-items:center;justify-content:center;font-size:13px;font-weight:600;border-radius:8px;cursor:pointer;padding:8px 14px;border:1px solid transparent;transition:all .15s ease}' +
-      '.fgc-bp{background:#fff;color:#0d0e11}' +
-      '.fgc-bp:hover{background:#e5e9f0}' +
-      '.fgc-bs{background:transparent;color:#fff;border-color:#4c566a}' +
-      '.fgc-bs:hover{border-color:#88c0d0;background:#1a1f29}' +
-      '.fgc-bg{background:transparent;color:#88c0d0;flex:.8}' +
-      '.fgc-bg:hover{background:rgba(136,192,208,.1)}' +
+      '.fgc-b{flex:1;min-height:44px;display:inline-flex;align-items:center;justify-content:center;font-size:13px;font-weight:600;border-radius:' + Math.min(r, 12) + 'px;cursor:pointer;padding:8px 14px;border:1px solid transparent;transition:filter .15s ease;font-family:inherit}' +
+      // Accept and Deny look the same (equal prominence, TDDDG § 25); Customize is the quieter third choice.
+      '.fgc-bp,.fgc-bs{background:' + ac + ';color:' + on + '}' +
+      '.fgc-bp:hover,.fgc-bs:hover{filter:brightness(.92)}' +
+      '.fgc-bg{background:transparent;color:' + fg + ';flex:.8;text-decoration:underline;text-underline-offset:2px}' +
+      '.fgc-b:focus-visible,.fgc-p a:focus-visible{outline:2px solid ' + fg + ';outline-offset:2px}' +
+      '.fgc-cookie-list{width:100%;border-collapse:collapse;font-size:14px}' +
+      '.fgc-cookie-list th,.fgc-cookie-list td{text-align:left;padding:6px 8px;border-bottom:1px solid currentColor;vertical-align:top}' +
       '@media(max-width:560px){.fgc-box{padding:10px}.fgc-card{padding:16px}.fgc-bar{flex-direction:column}.fgc-b{width:100%}}';
     doc.head.appendChild(s);
   }
@@ -232,6 +271,9 @@
 
   function buildDrawer(l) {
     var t = I18N[l] || I18N.de, lk = getLegalLinks(l);
+    var b = (S && S.banner) || {}, own = b.copy && b.copy[l];
+    var title = own && own.title ? esc(own.title) : t.t, body = own && own.body ? esc(own.body) : t.d;
+    var offerA = b.statistics !== false, offerM = b.marketing !== false;
     var el = doc.createElement('div');
     el.className = 'fgc-box';
     el.id = 'fgc-drawer';
@@ -239,13 +281,13 @@
     var gpcHtml = hasGPC ? '<div class="fgc-gpc">✔ ' + t.gpc + '</div>' : '';
     el.innerHTML = '<div class="fgc-card">' +
       '<span class="fgc-tag">' + t.b + '</span>' +
-      '<h2 class="fgc-h2">' + t.t + '</h2>' +
-      '<p class="fgc-p">' + t.d + ' (<a href="' + lk.p + '" target="_blank">' + t.pl + '</a> · <a href="' + lk.i + '" target="_blank">' + t.il + '</a>)</p>' +
+      '<h2 class="fgc-h2">' + title + '</h2>' +
+      '<p class="fgc-p">' + body + ' (<a href="' + esc(lk.p) + '" target="_blank">' + t.pl + '</a> · <a href="' + esc(lk.i) + '" target="_blank">' + t.il + '</a>)</p>' +
       gpcHtml +
       '<div class="fgc-acc" id="fgc-acc">' +
         '<label class="fgc-row"><input type="checkbox" checked disabled><div><strong>' + t.c.n[0] + '</strong><span>' + t.c.n[1] + '</span></div></label>' +
-        '<label class="fgc-row"><input type="checkbox" id="fgc-ca"><div><strong>' + t.c.a[0] + '</strong><span>' + t.c.a[1] + '</span></div></label>' +
-        '<label class="fgc-row"><input type="checkbox" id="fgc-cm"' + (hasGPC ? ' disabled' : '') + '><div><strong>' + t.c.m[0] + (hasGPC ? ' (GPC)' : '') + '</strong><span>' + t.c.m[1] + '</span></div></label>' +
+        (offerA ? '<label class="fgc-row"><input type="checkbox" id="fgc-ca"><div><strong>' + t.c.a[0] + '</strong><span>' + t.c.a[1] + '</span></div></label>' : '') +
+        (offerM ? '<label class="fgc-row"><input type="checkbox" id="fgc-cm"' + (hasGPC ? ' disabled' : '') + '><div><strong>' + t.c.m[0] + (hasGPC ? ' (GPC)' : '') + '</strong><span>' + t.c.m[1] + '</span></div></label>' : '') +
       '</div>' +
       '<div class="fgc-bar">' +
         '<button type="button" class="fgc-b fgc-bs" id="fgc-bd">' + t.deny + '</button>' +
@@ -308,16 +350,39 @@
     }
   }
 
+  var CAT = {
+    de: { necessary: 'Notwendig', statistics: 'Statistik', marketing: 'Marketing & Medien', h: ['Name', 'Anbieter', 'Kategorie', 'Zweck', 'Dauer'] },
+    en: { necessary: 'Necessary', statistics: 'Statistics', marketing: 'Marketing & media', h: ['Name', 'Provider', 'Category', 'Purpose', 'Lasts'] }
+  };
+
+  // The privacy page's cookie list, from Forge's latest scan, into each [data-fgc-cookie-list]. Every value escaped.
+  function fillCookieLists() {
+    var spots = doc.querySelectorAll('[data-fgc-cookie-list]');
+    if (!spots.length || !S || !S.cookies || !S.cookies.length) return;
+    injectCSS();
+    var l = getLang(), w = CAT[l] || CAT.de, rows = '';
+    for (var i = 0; i < S.cookies.length; i++) {
+      var c = S.cookies[i] || {};
+      rows += '<tr><td>' + esc(c.name) + '</td><td>' + esc(c.provider) + '</td><td>' + esc(w[c.category] || c.category) + '</td><td>' +
+        esc(c.purpose && c.purpose[l]) + '</td><td>' + esc(c.lasts && c.lasts[l]) + '</td></tr>';
+    }
+    var html = '<table class="fgc-cookie-list"><thead><tr><th>' + w.h.join('</th><th>') + '</th></tr></thead><tbody>' + rows + '</tbody></table>';
+    for (var j = 0; j < spots.length; j++) spots[j].innerHTML = html;
+  }
+
   function boot() {
     var c = getConsent();
     if (c) {
       updateGtag({ analytics: c.c.a, marketing: c.c.m });
       unblockScripts(c.c);
       try { win.dispatchEvent(new CustomEvent('freigeist:consent:updated', { detail: c })); } catch(e) {}
-    } else {
-      openUI();
     }
     bindReopen();
+    // A stored choice applies at once (above); the banner's look waits for Forge, at most 1.5 s.
+    loadSettings(function() {
+      fillCookieLists();
+      if (!c) openUI();
+    });
   }
 
   if (doc.readyState === 'loading') {
